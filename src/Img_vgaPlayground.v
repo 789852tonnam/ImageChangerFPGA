@@ -48,6 +48,18 @@ module tt_um_vga_example (
   // Suppress unused signals warning
   wire _unused_ok = &{ena, ui_in[7:1], uio_in};
 
+  // Toasting timer
+  reg [31:0] counter;
+  reg counter_prev;
+  wire counter_cur = counter[15];
+  wire toasting_tick;
+
+  assign toasting_tick = (~counter_prev) && counter_cur;
+
+  // Toasting slider
+  reg [9:0] slider_x;
+  reg [9:0] slider_negx;
+
   hvsync_generator vga_sync_gen (
       .clk(clk),
       .reset(~rst_n),
@@ -69,10 +81,34 @@ module tt_um_vga_example (
   end
 
   always @(posedge clk)begin
-       color <= img[mem_index]+img2[mem_index];
+    color <= img[mem_index];
+    color <= img2[mem_index];
+    if(!rst_n) begin
+      counter <= 0;
+      counter_prev <= 0;
+      slider_x <= 0;
+      slider_negx <= 640;
+    end else begin
+      counter <= counter + 1;
+      counter_prev <= counter_cur;
+      
+      if(toasting_tick) begin
+        slider_x <= (slider_x >= 640)? 0:slider_x + 1;
+        slider_negx <= (slider_x <= 0)? 640:slider_negx - 1;
+      end
+
+      if(pix_x < slider_x && pix_y[5] == 0) begin
+        color <= img[mem_index];
+      end
+
+      if(pix_x > slider_negx && pix_y[5] == 1) begin
+        color <= img[mem_index];
+      end
+    end
   end
+
   assign mem_index = (pix_y / MUL_FACTOR) * IMG_SIZE + pix_x / MUL_FACTOR;  
-  //assign color = img[mem_index]+img2[mem_index];
+  // assign color = img[mem_index]+img2[mem_index];
   assign R = (video_active)? color[5:4]:0;
   assign G = (video_active)? color[3:2]:0;
   assign B = (video_active)? color[1:0]:0;
