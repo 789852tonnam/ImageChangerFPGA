@@ -52,13 +52,34 @@ module tt_um_vga_example (
   reg [31:0] counter;
   reg counter_prev;
   wire counter_cur = counter[15];
-  wire toasting_tick;
+  reg counter_prev2;
+  wire couter_cur2 = counter[5];
+  wire slider_tick;
+  wire random_tick;
+  assign random_tick = (~counter_prev2) && couter_cur2;
 
-  assign toasting_tick = (~counter_prev) && counter_cur;
+  assign slider_tick = (~counter_prev) && counter_cur;
 
-  // Toasting slider
+  // Slider
   reg [9:0] slider_x;
   reg [9:0] slider_negx;
+
+  // Random
+  reg mask [0:307199];
+  reg [31:0] mask_idx;
+
+  // Add state
+  reg [1:0] current_state;
+  reg [1:0] next_state;
+
+  // ui_in_prev
+  reg [7:0] ui_in_prev;
+  wire [7:0] btn_press;
+  assign btn_press = ~ui_in_prev & ui_in;
+
+  localparam IDLE = 2'd0;
+  localparam CHANGING_SLIDE = 2'd1;
+  localparam CHANGING_DOT = 2'd2;
 
   hvsync_generator vga_sync_gen (
       .clk(clk),
@@ -78,6 +99,32 @@ module tt_um_vga_example (
   initial begin
     $readmemh("../data/bg1_dithering.mem", img);
     $readmemh("../data/bg1.mem", img2);
+    for (integer i = 0; i < 307200; i = i + 1) begin
+      mask[i] = 1'b0;
+    end
+  end
+
+  always @(*) begin
+    if(!rst_n) begin
+      next_state = 2'd0;
+    end else begin
+      next_state = current_state;
+      case(current_state)
+        2'd0:begin
+          if(btn_press[0])begin
+            next_state = CHANGING_SLIDE;
+          end
+          if(btn_press[1])begin
+            next_state = CHANGING_DOT;
+          end
+        end
+        2'd1:begin
+          if(slider_x >= 640)begin
+            next_state = IDLE;
+          end
+        end
+      endcase
+    end
   end
 
   always @(posedge clk)begin
@@ -86,24 +133,54 @@ module tt_um_vga_example (
     if(!rst_n) begin
       counter <= 0;
       counter_prev <= 0;
+      counter_prev2 <= 0;
       slider_x <= 0;
       slider_negx <= 640;
+      current_state <= 0;
+      ui_in_prev <= 0;
+      mask_idx <= 0;
     end else begin
-      counter <= counter + 1;
-      counter_prev <= counter_cur;
-      
-      if(toasting_tick) begin
-        slider_x <= (slider_x >= 640)? 0:slider_x + 1;
-        slider_negx <= (slider_x <= 0)? 640:slider_negx - 1;
-      end
+      current_state <= next_state;
+      ui_in_prev <= ui_in;
+      mask_idx <= mask_idx;
+      case(current_state)
+        2'd0:begin
+          counter <= 0;
+          counter_prev <= 0;
+          slider_x <= 0;
+          slider_negx <= 640;
+          mask_idx <= 0;
+        end
+        2'd1:begin
+          counter <= counter + 1;
+          counter_prev <= counter_cur;
+          
+          if(slider_tick) begin
+            slider_x <= (slider_x >= 640)? 0:slider_x + 1;
+            slider_negx <= (slider_x <= 0)? 640:slider_negx - 1;
+          end
 
-      if(pix_x < slider_x && pix_y[5] == 0) begin
-        color <= img[mem_index];
-      end
+          if(pix_x < slider_x && pix_y[5] == 0) begin
+            color <= img[mem_index];
+          end
 
-      if(pix_x > slider_negx && pix_y[5] == 1) begin
-        color <= img[mem_index];
-      end
+          if(pix_x > slider_negx && pix_y[5] == 1) begin
+            color <= img[mem_index];
+          end
+        end
+        2'd2:begin
+          counter <= counter + 1;
+          counter_prev2 <= couter_cur2;
+          if(random_tick)begin
+            mask[mask_idx] <= 1;
+            mask_idx <= (mask_idx + 27434317) % 307200;
+          end
+          if(mask[pix_x + pix_y * 640])begin
+            color <= img[mem_index];
+          end
+        end
+      endcase
+
     end
   end
 
